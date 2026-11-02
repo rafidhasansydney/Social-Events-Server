@@ -6,7 +6,9 @@
   "type": "module",
   "scripts": {
     "dev": "nodemon src/index.js",
-    "start": "node src/index.js"
+    "start": "node src/index.js",
+    "test": "node --test",
+    "db:check": "node src/scripts/check-db.js"
   },
   "dependencies": {
     "better-auth": "^1.7.14",

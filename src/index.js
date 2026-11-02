@@ -1,29 +1,52 @@
 import "dotenv/config";
-import express from "express";
-import cors from "cors";
-import { connectDB } from "./config/db.js";
+import { createApp } from "./app.js";
+import { ConfigurationError, readConfig } from "./config/env.js";
+import { connectDB, disconnectDB } from "./config/db.js";
+import { initializeModels } from "./models/index.js";
 
-const app = express();
-const PORT = process.env.PORT || 5000;
-const CLIENT_URL = process.env.CLIENT_URL || "http://localhost:3000";
+let server;
+let stopping = false;
 
-app.use(
-  cors({
-    origin: [CLIENT_URL],
-    credentials: true,
-  })
-);
+async function shutdown() {
+  if (stopping) return;
+  stopping = true;
+  const timer = setTimeout(() => process.exit(1), 10000);
+  timer.unref();
+  try {
+    if (server?.listening) {
+      await new Promise((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve())),
+      );
+    }
+    await disconnectDB();
+  } catch {
+    process.exitCode = 1;
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
-app.use(express.json());
+process.once("SIGINT", shutdown);
+process.once("SIGTERM", shutdown);
 
-app.get("/api/health", (req, res) => {
-  res.json({ ok: true, message: "Server is running" });
-});
-
-connectDB()
-  .catch((err) => console.error("DB connection error:", err.message))
-  .finally(() => {
-    app.listen(PORT, () => {
-      console.log(`Server running on http://localhost:${PORT}`);
-    });
+try {
+  const config = readConfig();
+  await connectDB(config);
+  await initializeModels();
+  const app = createApp({ clientUrl: config.clientUrl });
+  await new Promise((resolve, reject) => {
+    server = app.listen(config.port, resolve);
+    server.once("error", reject);
   });
+  console.log(`Server and database are ready on port ${config.port}.`);
+} catch (error) {
+  if (error instanceof ConfigurationError) {
+    console.error(error.message);
+  } else {
+    console.error(
+      "Server could not start. Check MongoDB access, database permissions and port availability.",
+    );
+  }
+  process.exitCode = 1;
+  await shutdown();
+}
