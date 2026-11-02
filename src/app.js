@@ -1,5 +1,7 @@
 import express from "express";
 import cors from "cors";
+import { toNodeHandler } from "better-auth/node";
+import { requireAuth } from "./middleware/require-auth.js";
 import { checkDatabaseReadiness } from "./config/db.js";
 import { errorHandler } from "./middleware/error-handler.js";
 import { HttpError } from "./utils/http-error.js";
@@ -7,6 +9,8 @@ import { HttpError } from "./utils/http-error.js";
 export function createApp({
   clientUrl = "http://localhost:3000",
   checkReadiness = checkDatabaseReadiness,
+  auth,
+  authUrl = "http://localhost:5000",
 } = {}) {
   const app = express();
   app.disable("x-powered-by");
@@ -25,11 +29,25 @@ export function createApp({
       credentials: true,
     }),
   );
-  app.use(express.json({ limit: "100kb" }));
   app.use((req, res, next) => {
     res.setHeader("Cache-Control", "no-store");
     next();
   });
+  if (auth)
+    app.all("/api/auth/*splat", (req, res, next) => {
+      req.headers["x-bandhan-client-ip"] = req.socket.remoteAddress;
+      return toNodeHandler(auth)(req, res, next);
+    });
+  app.use(express.json({ limit: "100kb" }));
+  if (auth) {
+    app.get(
+      "/api/me",
+      requireAuth({ auth, issuer: authUrl, audience: clientUrl }),
+      (req, res) => {
+        res.json({ ok: true, user: req.auth });
+      },
+    );
+  }
 
   app.get("/api/health", (req, res) => {
     res.json({ ok: true, message: "Server is running" });

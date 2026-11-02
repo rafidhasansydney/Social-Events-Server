@@ -3,6 +3,7 @@ import { createApp } from "./app.js";
 import { ConfigurationError, readConfig } from "./config/env.js";
 import { connectDB, disconnectDB } from "./config/db.js";
 import { initializeModels } from "./models/index.js";
+import { createAuth } from "./config/auth.js";
 
 let server;
 let stopping = false;
@@ -31,9 +32,15 @@ process.once("SIGTERM", shutdown);
 
 try {
   const config = readConfig();
-  await connectDB(config);
+  const connection = await connectDB(config);
   await initializeModels();
-  const app = createApp({ clientUrl: config.clientUrl });
+  const auth = createAuth({ connection, clientUrl: config.clientUrl });
+  await auth.$context;
+  const app = createApp({
+    clientUrl: config.clientUrl,
+    auth,
+    authUrl: process.env.BETTER_AUTH_URL || "http://localhost:5000",
+  });
   await new Promise((resolve, reject) => {
     server = app.listen(config.port, resolve);
     server.once("error", reject);
