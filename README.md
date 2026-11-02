@@ -37,7 +37,7 @@ JWTs expire after 15 minutes and are verified for signature, algorithm, expirati
 
 The frontend proxies `/api/*` to this server. Set the frontend `API_URL` to the backend origin in hosting configuration. For production on separate hosting domains, set `BETTER_AUTH_URL` to the public frontend proxy origin and add that origin's Google callback URI. Keep `CLIENT_URL` equal to the frontend origin. Verify HTTPS cookies, trusted proxy client IP handling and OAuth after deployment.
 
-Google OAuth consent is configured in Google Auth Platform. While the app is in Testing mode, add the Google accounts used for testing under Audience. A real browser sign-in is needed to verify account consent and the OAuth callback.
+Google OAuth consent is configured in Google Auth Platform. While the app is in Testing mode, add the Google accounts used for testing under Audience. A real browser sign-in on localhost verified Google account linking, the callback, an active session and access to the protected account page. Repeat this verification after deployment.
 
 ## Verification
 
