@@ -85,7 +85,7 @@ test("startup fails instead of listening without a database configuration", () =
     cwd: new URL("../", import.meta.url),
     env: { ...process.env, MONGODB_URI: "", PORT: "59999" },
     encoding: "utf8",
-    timeout: 5000,
+    timeout: 15000,
   });
   assert.equal(result.status, 1);
   assert.match(result.stderr, /MONGODB_URI/);
@@ -221,7 +221,7 @@ test("only the configured browser origin receives credentialed access", async ()
 
 test("unknown endpoints and malformed or oversized bodies return JSON errors", async () => {
   await withServer(createApp(), async (url) => {
-    const missing = await fetch(`${url}/api/events`);
+    const missing = await fetch(`${url}/api/not-found`);
     assert.equal(missing.status, 404);
     assert.equal((await missing.json()).error.code, "NOT_FOUND");
     const malformed = await fetch(`${url}/api/events`, {

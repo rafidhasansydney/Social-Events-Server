@@ -16,6 +16,8 @@ Run `npm run dev` for development or `npm start` to run the server. Startup requ
 | `GET /api/ready`  | Pings MongoDB and returns 503 if it is unavailable.                   |
 | `/api/auth/*`     | BetterAuth registration, login, sessions, Google OAuth, JWT and JWKS. |
 | `GET /api/me`     | Returns the authenticated user after JWT and active-session checks.   |
+| `POST /api/events` | Creates an event for the authenticated organizer. Requires JWT and active session. |
+| `GET /api/events` | Public future events, sorted by event date and ID. Optional `limit` from 1 to 100. |
 
 Browser requests are allowed from the exact `CLIENT_URL` origin. Errors use `{ ok: false, error: { code, message, details? } }`.
 
@@ -25,7 +27,9 @@ Events store a title, description, event type, image URL, location, future event
 
 Joined events reference the original event and store the participant ID and email. A unique compound index on `eventId` and `userId` prevents duplicate participation once the index is initialized. Reading the referenced event keeps joined listings consistent with organizer updates.
 
-Event endpoints belong to later phases. Creator and participant identities must come from `req.auth`, which the authentication middleware populates from the verified active session. Never accept ownership or participation identity from request bodies.
+Event creation accepts only `title`, `description`, `eventType`, `thumbnailUrl`, `location` and an ISO date-time string with a timezone as `eventDate`. It validates field types, required values, length limits, supported causes, HTTP(S) image URLs and strictly future dates. Calendar dates that do not exist are rejected. Creator ID and email come from `req.auth`; supplied ownership fields are ignored. Public event responses exclude organizer IDs and email addresses.
+
+Upcoming queries exclude past events, sort by `eventDate` and `_id`, and apply MongoDB `.limit()` when requested. Event details, participation and organizer update/delete endpoints belong to later phases.
 
 ## Authentication
 
@@ -41,7 +45,7 @@ Google OAuth consent is configured in Google Auth Platform. While the app is in 
 
 ## Verification
 
-Run `npm test`. Tests exercise configuration, startup failure, model validation, immutable ownership, HTTP health and readiness, CORS, request parsing and error responses without connecting to MongoDB.
+Run `npm test`. Tests exercise configuration, startup failure, model validation, immutable ownership, event request validation, authentication requirements, identity spoofing, HTTP health and readiness, CORS, request parsing and error responses without connecting to MongoDB.
 
 Run `npm run db:check` to check the configured connection. For Atlas SRV connections, it checks DNS and certificate-verified TLS before testing authentication and a database ping. It prints no credentials and writes no data. A TLS failure before authentication does not establish whether the password is correct.
 
@@ -49,4 +53,4 @@ Live Atlas verification passed for authentication, database ping, collection/ind
 
 Collections and indexes are initialized explicitly after connecting to MongoDB, so importing models cannot start database operations before a connection is ready.
 
-Run `npm run auth:check` for an isolated live authentication check. It creates a uniquely named temporary database, checks password validation, registration, login, sessions, JWT tampering, logout revocation and Google redirect configuration, and removes only that test database afterward. It does not complete real Google consent or sign-in.
+Run `npm run auth:check` for an isolated live authentication and event check. It creates a uniquely named temporary database and tests password validation, registration, login, sessions, JWT tampering, logout revocation and Google redirect configuration. It also verifies event persistence, rejection of unauthenticated writes and invalid fields, trusted ownership, future-only public listings, chronological ordering, limits and creator privacy. It removes only that test database afterward. It does not complete real Google consent or sign-in.

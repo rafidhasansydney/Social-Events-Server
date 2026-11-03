@@ -5,12 +5,14 @@ import { requireAuth } from "./middleware/require-auth.js";
 import { checkDatabaseReadiness } from "./config/db.js";
 import { errorHandler } from "./middleware/error-handler.js";
 import { HttpError } from "./utils/http-error.js";
+import { createEventRouter } from "./routes/events.js";
 
 export function createApp({
   clientUrl = "http://localhost:3000",
   checkReadiness = checkDatabaseReadiness,
   auth,
   authUrl = "http://localhost:5000",
+  eventModel,
 } = {}) {
   const app = express();
   app.disable("x-powered-by");
@@ -39,6 +41,11 @@ export function createApp({
       return toNodeHandler(auth)(req, res, next);
     });
   app.use(express.json({ limit: "100kb" }));
+  const authenticate = auth
+    ? requireAuth({ auth, issuer: authUrl, audience: clientUrl })
+    : (req, res, next) =>
+        next(new HttpError(401, "UNAUTHORIZED", "Please log in to continue."));
+  app.use("/api/events", createEventRouter({ authenticate, eventModel }));
   if (auth) {
     app.get(
       "/api/me",

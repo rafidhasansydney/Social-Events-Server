@@ -11,7 +11,12 @@ export const EVENT_TYPES = [
 
 function isImageUrl(value) {
   try {
-    return ["https:", "http:"].includes(new URL(value).protocol);
+    const url = new URL(value);
+    return (
+      ["https:", "http:"].includes(url.protocol) &&
+      !url.username &&
+      !url.password
+    );
   } catch {
     return false;
   }
@@ -86,7 +91,13 @@ const eventSchema = new mongoose.Schema(
     },
     creatorEmail: { ...emailField, immutable: true },
   },
-  { timestamps: true, versionKey: false, bufferCommands: false, autoCreate: false, autoIndex: false },
+  {
+    timestamps: true,
+    versionKey: false,
+    bufferCommands: false,
+    autoCreate: false,
+    autoIndex: false,
+  },
 );
 
 eventSchema.index({ eventDate: 1, _id: 1 });

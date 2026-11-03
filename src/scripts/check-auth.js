@@ -6,6 +6,7 @@ import { readConfig } from "../config/env.js";
 import { connectDB, disconnectDB } from "../config/db.js";
 import { createAuth } from "../config/auth.js";
 import { createApp } from "../app.js";
+import { Event } from "../models/event.js";
 
 const databaseName = `bandhan_auth_check_${randomUUID().replaceAll("-", "").slice(0, 16)}`;
 let database;
@@ -25,7 +26,19 @@ try {
     env: { ...process.env, BETTER_AUTH_URL: baseURL, NODE_ENV: "test" },
   });
   await auth.$context;
-  host.use(createApp({ auth, authUrl: baseURL, clientUrl: config.clientUrl }));
+  const eventModel = connection
+    .useDb(databaseName)
+    .model("Event", Event.schema);
+  await eventModel.createCollection();
+  await eventModel.createIndexes();
+  host.use(
+    createApp({
+      auth,
+      authUrl: baseURL,
+      clientUrl: config.clientUrl,
+      eventModel,
+    }),
+  );
   let cookie = "";
   async function request(path, body, token, withCookie = true) {
     const headers = { Origin: config.clientUrl };
@@ -79,6 +92,78 @@ try {
   const tokenResult = await request("/api/auth/token");
   assert.equal(tokenResult.status, 200);
   const token = tokenResult.data.token;
+  const eventData = {
+    title: "  A greener neighbourhood  ",
+    description: "Plant native trees together. Bring a water bottle.",
+    eventType: "Plantation",
+    thumbnailUrl: "https://example.com/trees.jpg",
+    location: "Mirpur, Dhaka",
+    eventDate: new Date(Date.now() + 86400000).toISOString(),
+    creatorId: "forged-owner",
+    creatorEmail: "forged@example.com",
+  };
+  assert.equal((await request("/api/events", eventData)).status, 401);
+  assert.equal(
+    (await request("/api/events", eventData, token, false)).status,
+    401,
+  );
+  for (const change of [
+    { eventDate: new Date(Date.now() - 1000).toISOString() },
+    { eventDate: "tomorrow" },
+    { title: "   " },
+    { location: "" },
+    { description: "" },
+    { title: { $gt: "" } },
+    { eventType: "Unknown" },
+    { thumbnailUrl: "javascript:alert(1)" },
+    { thumbnailUrl: "https://user:password@example.com/image.jpg" },
+  ]) {
+    assert.equal(
+      (await request("/api/events", { ...eventData, ...change }, token)).status,
+      400,
+    );
+  }
+  assert.equal(await eventModel.countDocuments(), 0);
+  const created = await request("/api/events", eventData, token);
+  assert.equal(created.status, 201);
+  assert.equal(created.data.event.title, "A greener neighbourhood");
+  const saved = await eventModel.findById(created.data.event._id).lean();
+  assert.equal(saved.creatorId, registered.data.user.id);
+  assert.equal(saved.creatorEmail, credentials.email);
+  await eventModel.collection.insertMany([
+    {
+      ...eventData,
+      title: "Past gathering",
+      eventDate: new Date(Date.now() - 1000),
+    },
+    {
+      ...eventData,
+      title: "Later gathering",
+      eventDate: new Date(Date.now() + 172800000),
+    },
+  ]);
+  const upcoming = await request("/api/events", undefined, undefined, false);
+  assert.equal(upcoming.status, 200);
+  assert.deepEqual(
+    upcoming.data.events.map((event) => event.title),
+    ["A greener neighbourhood", "Later gathering"],
+  );
+  for (const event of upcoming.data.events) {
+    assert.equal(event.creatorId, undefined);
+    assert.equal(event.creatorEmail, undefined);
+  }
+  const limited = await request(
+    "/api/events?limit=1",
+    undefined,
+    undefined,
+    false,
+  );
+  assert.equal(limited.data.events.length, 1);
+  assert.equal(limited.data.events[0]._id, created.data.event._id);
+  assert.equal((await request("/api/events?limit=0")).status, 400);
+  console.log(
+    "PASS: event creation, JWT/session protection, field validation, future dates, trusted ownership, persisted data, public upcoming order, limits and creator privacy.",
+  );
   assert.equal(
     (await request("/api/me", undefined, token)).data.user.email,
     credentials.email,
