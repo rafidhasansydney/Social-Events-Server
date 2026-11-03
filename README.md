@@ -18,6 +18,9 @@ Run `npm run dev` for development or `npm start` to run the server. Startup requ
 | `GET /api/me`     | Returns the authenticated user after JWT and active-session checks.   |
 | `POST /api/events` | Creates an event for the authenticated organizer. Requires JWT and active session. |
 | `GET /api/events` | Public future events, sorted by event date and ID. Optional `limit` from 1 to 100. |
+| `PATCH /api/me` | Updates the current member's name, image, bio and area after JWT/session checks. |
+| `POST /api/uploads?kind=event` | Accepts one authenticated multipart photo in the `image` field. Use `kind=profile` for profile sizing. |
+| `GET /api/images/:id` | Public immutable WebP photo delivery. |
 
 Browser requests are allowed from the exact `CLIENT_URL` origin. Errors use `{ ok: false, error: { code, message, details? } }`.
 
@@ -30,6 +33,14 @@ Joined events reference the original event and store the participant ID and emai
 Event creation accepts only `title`, `description`, `eventType`, `thumbnailUrl`, `location` and an ISO date-time string with a timezone as `eventDate`. It validates field types, required values, length limits, supported causes, HTTP(S) image URLs and strictly future dates. Calendar dates that do not exist are rejected. Creator ID and email come from `req.auth`; supplied ownership fields are ignored. Public event responses exclude organizer IDs and email addresses.
 
 Upcoming queries exclude past events, sort by `eventDate` and `_id`, and apply MongoDB `.limit()` when requested. Event details, participation and organizer update/delete endpoints belong to later phases.
+
+## Photos and editable profiles
+
+Uploads require both a valid JWT and an active cookie session. Multer accepts one JPG, PNG or WebP file, at most 4 MB, with no extra multipart fields. Sharp verifies actual image data, rejects unsupported/animated formats and images over 40 megapixels, orients the photo, removes metadata and converts it to WebP. Event photos fit within 1600×1600 and profile photos within 512×512 without enlargement. Compressed output is limited to 1 MB. Upload attempts are limited to 30 per member per hour per running server process.
+
+The `UploadedImage` collection stores compressed bytes, dimensions and the authenticated uploader ID. Public responses return image URLs and dimensions; they do not expose uploader identities. Images are served with `image/webp`, `nosniff` and immutable cache headers. This uses the existing MongoDB connection and storage allowance; no media API key or writable hosting disk is required. Older image files are retained when a profile photo is replaced.
+
+The profile endpoint accepts only `name`, `image`, `bio` and `location` and updates the current BetterAuth user. Names are trimmed and limited to 100 characters, bios to 400 and areas to 100. Email, user ID and other account fields cannot be changed through this endpoint. The same field validation runs on BetterAuth's direct update route. Additional bio and location fields default to empty strings for new users; older users can leave them empty.
 
 ## Authentication
 
@@ -45,7 +56,7 @@ Google OAuth consent is configured in Google Auth Platform. While the app is in 
 
 ## Verification
 
-Run `npm test`. Tests exercise configuration, startup failure, model validation, immutable ownership, event request validation, authentication requirements, identity spoofing, HTTP health and readiness, CORS, request parsing and error responses without connecting to MongoDB.
+Run `npm test`. Tests exercise configuration, startup failure, model validation, immutable ownership, event and profile request validation, image decoding/resizing, authentication requirements, identity spoofing, HTTP health and readiness, CORS, request parsing and error responses without connecting to MongoDB.
 
 Run `npm run db:check` to check the configured connection. For Atlas SRV connections, it checks DNS and certificate-verified TLS before testing authentication and a database ping. It prints no credentials and writes no data. A TLS failure before authentication does not establish whether the password is correct.
 
@@ -53,4 +64,4 @@ Live Atlas verification passed for authentication, database ping, collection/ind
 
 Collections and indexes are initialized explicitly after connecting to MongoDB, so importing models cannot start database operations before a connection is ready.
 
-Run `npm run auth:check` for an isolated live authentication and event check. It creates a uniquely named temporary database and tests password validation, registration, login, sessions, JWT tampering, logout revocation and Google redirect configuration. It also verifies event persistence, rejection of unauthenticated writes and invalid fields, trusted ownership, future-only public listings, chronological ordering, limits and creator privacy. It removes only that test database afterward. It does not complete real Google consent or sign-in.
+Run `npm run auth:check` for an isolated live authentication, profile, photo and event check. It creates a uniquely named temporary database and tests password validation, registration, login, sessions, JWT tampering, logout revocation and Google redirect configuration. It also verifies profile persistence and validation, authenticated uploads, image resizing/storage/delivery, event persistence, rejection of unauthenticated writes and invalid fields, trusted ownership, future-only public listings, chronological ordering, limits and creator privacy. It removes only that test database afterward. It does not complete real Google consent or sign-in.

@@ -11,6 +11,13 @@ export function errorHandler(error, req, res, next) {
 
   if (error instanceof HttpError) {
     ({ status, code, message } = error);
+  } else if (error.name === "MulterError") {
+    status = error.code === "LIMIT_FILE_SIZE" ? 413 : 400;
+    code = "INVALID_UPLOAD";
+    message =
+      error.code === "LIMIT_FILE_SIZE"
+        ? "Choose a photo smaller than 4 MB."
+        : "Upload one photo at a time.";
   } else if (error instanceof mongoose.Error.ValidationError) {
     status = 400;
     code = "VALIDATION_ERROR";

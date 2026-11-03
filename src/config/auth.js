@@ -3,6 +3,7 @@ import { mongodbAdapter } from "better-auth/adapters/mongodb";
 import { APIError, createAuthMiddleware } from "better-auth/api";
 import { jwt } from "better-auth/plugins";
 import { ConfigurationError } from "./env.js";
+import { parseProfile } from "../utils/profile.js";
 
 export function createAuth({ connection, clientUrl, env = process.env }) {
   const secret = env.BETTER_AUTH_SECRET;
@@ -36,6 +37,12 @@ export function createAuth({ connection, clientUrl, env = process.env }) {
     database: mongodbAdapter(connection.db, { client: connection.getClient() }),
     trustedOrigins: [clientUrl],
     advanced: { ipAddress: { ipAddressHeaders: ["x-bandhan-client-ip"] } },
+    user: {
+      additionalFields: {
+        bio: { type: "string", required: false, defaultValue: "" },
+        location: { type: "string", required: false, defaultValue: "" },
+      },
+    },
     emailAndPassword: {
       enabled: true,
       minPasswordLength: 6,
@@ -75,7 +82,15 @@ export function createAuth({ connection, clientUrl, env = process.env }) {
     ],
     hooks: {
       before: createAuthMiddleware(async (ctx) => {
-        if (ctx.path !== "/sign-up/email") return;
+        if (!["/sign-up/email", "/update-user"].includes(ctx.path)) return;
+        let profile;
+        try {
+          profile = parseProfile(ctx.body);
+        } catch (error) {
+          throw new APIError("BAD_REQUEST", { message: error.message });
+        }
+        if (ctx.path === "/update-user")
+          return { context: { ...ctx, body: { ...ctx.body, ...profile } } };
         const { password, name, image } = ctx.body || {};
         if (
           typeof password !== "string" ||
@@ -111,7 +126,10 @@ export function createAuth({ connection, clientUrl, env = process.env }) {
           });
         }
         return {
-          context: { ...ctx, body: { ...ctx.body, name: name.trim() } },
+          context: {
+            ...ctx,
+            body: { ...ctx.body, ...profile, name: name.trim() },
+          },
         };
       }),
     },

@@ -7,6 +7,8 @@ import { connectDB, disconnectDB } from "../config/db.js";
 import { createAuth } from "../config/auth.js";
 import { createApp } from "../app.js";
 import { Event } from "../models/event.js";
+import { UploadedImage } from "../models/image.js";
+import sharp from "sharp";
 
 const databaseName = `bandhan_auth_check_${randomUUID().replaceAll("-", "").slice(0, 16)}`;
 let database;
@@ -31,22 +33,28 @@ try {
     .model("Event", Event.schema);
   await eventModel.createCollection();
   await eventModel.createIndexes();
+  const imageModel = connection
+    .useDb(databaseName)
+    .model("UploadedImage", UploadedImage.schema);
+  await imageModel.createCollection();
+  await imageModel.createIndexes();
   host.use(
     createApp({
       auth,
       authUrl: baseURL,
       clientUrl: config.clientUrl,
       eventModel,
+      imageModel,
     }),
   );
   let cookie = "";
-  async function request(path, body, token, withCookie = true) {
+  async function request(path, body, token, withCookie = true, method) {
     const headers = { Origin: config.clientUrl };
     if (withCookie && cookie) headers.Cookie = cookie;
     if (body) headers["Content-Type"] = "application/json";
     if (token) headers.Authorization = `Bearer ${token}`;
     const response = await fetch(`${baseURL}${path}`, {
-      method: body ? "POST" : "GET",
+      method: method || (body ? "POST" : "GET"),
       headers,
       ...(body && { body: JSON.stringify(body) }),
     });
@@ -92,6 +100,97 @@ try {
   const tokenResult = await request("/api/auth/token");
   assert.equal(tokenResult.status, 200);
   const token = tokenResult.data.token;
+  const profileData = {
+    name: "  Updated Member  ",
+    bio: "  A little time for greener streets.  ",
+    location: "  Dhaka  ",
+  };
+  assert.equal(
+    (await request("/api/me", profileData, undefined, true, "PATCH")).status,
+    401,
+  );
+  for (const invalid of [
+    { name: "  " },
+    { bio: "x".repeat(401) },
+    { location: {} },
+    { image: "javascript:alert(1)" },
+    { email: "other@example.com" },
+    { id: "other-user", name: "Other Member" },
+  ])
+    assert.equal(
+      (await request("/api/me", invalid, token, true, "PATCH")).status,
+      400,
+    );
+  assert.equal(
+    (await request("/api/auth/update-user", { name: "  " })).status,
+    400,
+  );
+  assert.equal(
+    (await request("/api/auth/update-user", { bio: "x".repeat(401) })).status,
+    400,
+  );
+  assert.equal(
+    (await request("/api/me", profileData, token, true, "PATCH")).status,
+    200,
+  );
+  const profile = (await request("/api/auth/get-session")).data.user;
+  assert.equal(profile.name, "Updated Member");
+  assert.equal(profile.bio, "A little time for greener streets.");
+  assert.equal(profile.location, "Dhaka");
+  assert.equal(profile.email, credentials.email);
+  const pixels = await sharp({
+    create: { width: 900, height: 600, channels: 3, background: "#244b3b" },
+  })
+    .png()
+    .toBuffer();
+  async function upload(withToken = true, bytes = pixels, mime = "image/png") {
+    const data = new FormData();
+    data.append("image", new Blob([bytes], { type: mime }), "test-photo.png");
+    return fetch(`${baseURL}/api/uploads?kind=profile`, {
+      method: "POST",
+      headers: {
+        Origin: config.clientUrl,
+        Cookie: cookie,
+        ...(withToken && { Authorization: `Bearer ${token}` }),
+      },
+      body: data,
+    });
+  }
+  assert.equal((await upload(false)).status, 401);
+  assert.equal((await upload(true, Buffer.from("not a photo"))).status, 400);
+  assert.equal(
+    (await upload(true, Buffer.alloc(4 * 1024 * 1024 + 1))).status,
+    413,
+  );
+  const photo = await upload();
+  assert.equal(photo.status, 201);
+  const uploaded = (await photo.json()).image;
+  assert.equal(uploaded.width, 512);
+  assert.equal(await imageModel.countDocuments(), 1);
+  const stored = await imageModel.findOne().select("+data");
+  assert.equal(stored.ownerId, registered.data.user.id);
+  assert.equal((await sharp(stored.data).metadata()).format, "webp");
+  const photoPath = new URL(uploaded.url).pathname;
+  const download = await fetch(`${baseURL}${photoPath}`);
+  assert.equal(download.status, 200);
+  assert.match(download.headers.get("content-type"), /image\/webp/);
+  assert.equal(download.headers.get("x-content-type-options"), "nosniff");
+  assert.deepEqual(
+    Buffer.from(await download.arrayBuffer()),
+    Buffer.from(stored.data),
+  );
+  assert.equal(
+    (await request("/api/me", { image: uploaded.url }, token, true, "PATCH"))
+      .status,
+    200,
+  );
+  assert.equal(
+    (await request("/api/auth/get-session")).data.user.image,
+    uploaded.url,
+  );
+  console.log(
+    "PASS: profile persistence, session refresh, input validation, protected uploads, file limits, image decoding, resizing, WebP storage and public photo delivery.",
+  );
   const eventData = {
     title: "  A greener neighbourhood  ",
     description: "Plant native trees together. Bring a water bottle.",
