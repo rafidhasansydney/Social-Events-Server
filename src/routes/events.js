@@ -2,17 +2,10 @@ import { Router } from "express";
 import { Event, EVENT_TYPES } from "../models/event.js";
 import { JoinedEvent } from "../models/joined-event.js";
 import { HttpError } from "../utils/http-error.js";
+import { readEventInput } from "../utils/event-input.js";
 
 const publicFields =
   "title description eventType thumbnailUrl location eventDate createdAt";
-const fields = [
-  "title",
-  "description",
-  "eventType",
-  "thumbnailUrl",
-  "location",
-  "eventDate",
-];
 
 export function createEventRouter({
   authenticate,
@@ -28,8 +21,11 @@ export function createEventRouter({
     next();
   });
 
-  async function findEvent(id) {
-    const event = await eventModel.findById(id).select(publicFields).lean();
+  async function findEvent(id, includeOwner = false) {
+    const event = await eventModel
+      .findById(id)
+      .select(`${publicFields}${includeOwner ? " creatorId" : ""}`)
+      .lean();
     if (!event)
       throw new HttpError(
         404,
@@ -38,6 +34,55 @@ export function createEventRouter({
       );
     return event;
   }
+
+  async function ownedEvent(id, userId, session) {
+    const event = await eventModel.findById(id).session(session || null);
+    if (!event)
+      throw new HttpError(
+        404,
+        "EVENT_NOT_FOUND",
+        "This event could not be found.",
+      );
+    if (event.creatorId !== userId)
+      throw new HttpError(
+        403,
+        "EVENT_FORBIDDEN",
+        "You can only manage events you created.",
+      );
+    return event;
+  }
+
+  function listEvent(event) {
+    return {
+      ...event,
+      hasStarted: new Date(event.eventDate).getTime() <= Date.now(),
+    };
+  }
+
+  router.get("/mine", authenticate, async (req, res) => {
+    const events = await eventModel
+      .find({ creatorId: req.auth.id })
+      .sort({ createdAt: -1, _id: -1 })
+      .select(`${publicFields} updatedAt`)
+      .lean();
+    res.json({ ok: true, events: events.map(listEvent) });
+  });
+
+  router.get("/joined", authenticate, async (req, res) => {
+    const participations = await joinedEventModel
+      .find({ userId: req.auth.id })
+      .select("eventId")
+      .lean();
+    const events = await eventModel
+      .find({
+        _id: { $in: participations.map((item) => item.eventId) },
+        creatorId: { $ne: req.auth.id },
+      })
+      .sort({ eventDate: 1, _id: 1 })
+      .select(publicFields)
+      .lean();
+    res.json({ ok: true, events: events.map(listEvent) });
+  });
 
   router.get("/", async (req, res) => {
     const limit = req.query.limit;
@@ -95,73 +140,109 @@ export function createEventRouter({
   });
 
   router.get("/:id/participation", authenticate, async (req, res) => {
-    await findEvent(req.params.id);
+    const event = await findEvent(req.params.id, true);
+    const organizer = event.creatorId === req.auth.id;
     const joined = Boolean(
-      await joinedEventModel.exists({
-        eventId: req.params.id,
-        userId: req.auth.id,
-      }),
+      !organizer &&
+        (await joinedEventModel.exists({
+          eventId: req.params.id,
+          userId: req.auth.id,
+        })),
     );
-    res.json({ ok: true, joined });
+    res.json({ ok: true, joined, organizer });
   });
 
   router.post("/:id/join", authenticate, async (req, res) => {
-    const event = await findEvent(req.params.id);
-    if (new Date(event.eventDate).getTime() <= Date.now())
-      throw new HttpError(
-        409,
-        "EVENT_ENDED",
-        "This event has already started. Choose another upcoming gathering.",
+    const alreadyJoined = await eventModel.db.transaction(async (session) => {
+      const event = await eventModel
+        .findById(req.params.id)
+        .select("creatorId eventDate")
+        .session(session)
+        .lean();
+      if (!event)
+        throw new HttpError(
+          404,
+          "EVENT_NOT_FOUND",
+          "This event could not be found.",
+        );
+      if (event.creatorId === req.auth.id)
+        throw new HttpError(
+          403,
+          "ORGANIZER_CANNOT_JOIN",
+          "You’re organising this event. Manage it from your events.",
+        );
+      if (new Date(event.eventDate).getTime() <= Date.now())
+        throw new HttpError(
+          409,
+          "EVENT_ENDED",
+          "This event has already started. Choose another upcoming gathering.",
+        );
+      await eventModel.updateOne(
+        { _id: event._id },
+        { $inc: { revision: 1 } },
+        { session, timestamps: false },
       );
-    try {
-      await joinedEventModel.create({
-        eventId: event._id,
-        userId: req.auth.id,
-        userEmail: req.auth.email,
-      });
-      res.status(201).json({ ok: true, joined: true, alreadyJoined: false });
-    } catch (error) {
-      if (error.code !== 11000) throw error;
-      res.json({ ok: true, joined: true, alreadyJoined: true });
-    }
+      const existing = await joinedEventModel
+        .exists({ eventId: event._id, userId: req.auth.id })
+        .session(session);
+      if (existing) return true;
+      await joinedEventModel.create(
+        [
+          {
+            eventId: event._id,
+            userId: req.auth.id,
+            userEmail: req.auth.email,
+          },
+        ],
+        { session },
+      );
+      return false;
+    });
+    res
+      .status(alreadyJoined ? 200 : 201)
+      .json({ ok: true, joined: true, alreadyJoined });
+  });
+
+  router.get("/:id/manage", authenticate, async (req, res) => {
+    const event = await ownedEvent(req.params.id, req.auth.id);
+    const result = event.toObject();
+    delete result.creatorId;
+    delete result.creatorEmail;
+    delete result.revision;
+    res.json({ ok: true, event: result });
+  });
+
+  router.put("/:id", authenticate, async (req, res) => {
+    const data = readEventInput(req.body);
+    const event = await eventModel.db.transaction(async (session) => {
+      const current = await ownedEvent(req.params.id, req.auth.id, session);
+      current.set(data);
+      await current.save({ session });
+      return current.toObject();
+    });
+    delete event.creatorId;
+    delete event.creatorEmail;
+    delete event.revision;
+    res.json({ ok: true, event });
+  });
+
+  router.delete("/:id", authenticate, async (req, res) => {
+    await eventModel.db.transaction(async (session) => {
+      await ownedEvent(req.params.id, req.auth.id, session);
+      await eventModel.deleteOne(
+        { _id: req.params.id, creatorId: req.auth.id },
+        { session },
+      );
+      await joinedEventModel.deleteMany(
+        { eventId: req.params.id },
+        { session },
+      );
+    });
+    res.json({ ok: true });
   });
 
   router.post("/", authenticate, async (req, res) => {
-    const body = req.body;
-    if (!body || Array.isArray(body) || typeof body !== "object")
-      throw new HttpError(
-        400,
-        "INVALID_EVENT",
-        "Enter the details for your event.",
-      );
-    const data = {};
-    for (const field of fields) {
-      if (typeof body[field] !== "string")
-        throw new HttpError(
-          400,
-          "INVALID_EVENT",
-          "Complete all event fields using text values.",
-        );
-      data[field] = body[field].trim();
-    }
-    if (
-      !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/.test(
-        data.eventDate,
-      )
-    )
-      throw new HttpError(
-        400,
-        "INVALID_DATE",
-        "Choose a valid event date and time.",
-      );
-    const calendarDate = new Date(
-      `${data.eventDate.slice(0, 10)}T00:00:00.000Z`,
-    );
-    if (
-      !Number.isFinite(calendarDate.getTime()) ||
-      calendarDate.toISOString().slice(0, 10) !== data.eventDate.slice(0, 10)
-    )
-      throw new HttpError(400, "INVALID_DATE", "Choose a valid calendar date.");
+    const data = readEventInput(req.body);
     const event = await eventModel.create({
       ...data,
       creatorId: req.auth.id,
@@ -170,6 +251,7 @@ export function createEventRouter({
     const result = event.toObject();
     delete result.creatorId;
     delete result.creatorEmail;
+    delete result.revision;
     res.status(201).json({ ok: true, event: result });
   });
 

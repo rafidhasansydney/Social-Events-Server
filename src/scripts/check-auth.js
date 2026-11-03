@@ -282,8 +282,23 @@ try {
     (await request("/api/events/000000000000000000000000")).status,
     404,
   );
-  const joinPath = `/api/events/${created.data.event._id}/join`;
-  const statusPath = `/api/events/${created.data.event._id}/participation`;
+  const ownStatus = await request(
+    `/api/events/${created.data.event._id}/participation`,
+    undefined,
+    token,
+  );
+  assert.equal(ownStatus.data.organizer, true);
+  assert.equal(ownStatus.data.joined, false);
+  assert.equal(
+    (await request(`/api/events/${created.data.event._id}/join`, {}, token))
+      .status,
+    403,
+  );
+  const joinEvent = await eventModel
+    .findOne({ title: "Later gathering" })
+    .lean();
+  const joinPath = `/api/events/${joinEvent._id}/join`;
+  const statusPath = `/api/events/${joinEvent._id}/participation`;
   assert.equal((await request(joinPath, {})).status, 401);
   assert.equal((await request(joinPath, {}, token, false)).status, 401);
   assert.equal((await request(statusPath)).status, 401);
@@ -359,6 +374,318 @@ try {
   assert.equal(searched.data.events[0].title, "Garden (east)");
   assert.equal((await request("/api/events?q=.%2A")).data.events.length, 0);
   assert.equal((await request("/api/events?type=Unknown")).status, 400);
+  assert.equal((await request("/api/events/mine")).status, 401);
+  assert.equal((await request("/api/events/joined")).status, 401);
+  const mine = await request("/api/events/mine", undefined, token);
+  assert.equal(mine.status, 200);
+  assert.deepEqual(
+    mine.data.events.map((event) => event._id),
+    [created.data.event._id],
+  );
+  assert.equal(
+    (
+      await request(
+        `/api/events/${created.data.event._id}/manage`,
+        undefined,
+        token,
+      )
+    ).status,
+    200,
+  );
+  assert.equal(
+    (await request(`/api/events/${joinEvent._id}/manage`, undefined, token))
+      .status,
+    403,
+  );
+  assert.equal(
+    (
+      await request(
+        `/api/events/${joinEvent._id}`,
+        eventData,
+        token,
+        true,
+        "PUT",
+      )
+    ).status,
+    403,
+  );
+  assert.equal(
+    (
+      await request(
+        `/api/events/${joinEvent._id}`,
+        undefined,
+        token,
+        true,
+        "DELETE",
+      )
+    ).status,
+    403,
+  );
+  const updated = await request(
+    `/api/events/${created.data.event._id}`,
+    { ...eventData, title: "Updated gathering", creatorId: "forged-owner" },
+    token,
+    true,
+    "PUT",
+  );
+  assert.equal(updated.status, 200);
+  assert.equal(updated.data.event.title, "Updated gathering");
+  assert.equal(
+    (await eventModel.findById(created.data.event._id).lean()).creatorId,
+    registered.data.user.id,
+  );
+  assert.equal(
+    (
+      await request(
+        `/api/events/${created.data.event._id}`,
+        { ...eventData, eventDate: new Date(Date.now() - 1000).toISOString() },
+        token,
+        true,
+        "PUT",
+      )
+    ).status,
+    400,
+  );
+  await joinedEventModel.create({
+    eventId: created.data.event._id,
+    userId: registered.data.user.id,
+    userEmail: credentials.email,
+  });
+  const joined = await request("/api/events/joined", undefined, token);
+  assert.equal(joined.status, 200);
+  assert.deepEqual(
+    joined.data.events.map((event) => event._id),
+    [String(joinEvent._id)],
+  );
+  const ownPast = await eventModel.collection.insertOne({
+    ...eventData,
+    title: "Own past event",
+    creatorId: registered.data.user.id,
+    creatorEmail: credentials.email,
+    eventDate: new Date(Date.now() - 86400000),
+  });
+  const pastInput = {
+    ...eventData,
+    title: "Past event updated",
+    eventDate: (
+      await eventModel.findById(ownPast.insertedId)
+    ).eventDate.toISOString(),
+  };
+  assert.equal(
+    (
+      await request(
+        `/api/events/${ownPast.insertedId}`,
+        pastInput,
+        token,
+        true,
+        "PUT",
+      )
+    ).status,
+    200,
+  );
+  assert.equal(
+    (
+      await request(
+        `/api/events/${ownPast.insertedId}`,
+        {
+          ...pastInput,
+          eventDate: new Date(Date.now() - 7200000).toISOString(),
+        },
+        token,
+        true,
+        "PUT",
+      )
+    ).status,
+    400,
+  );
+  const cookieA = cookie;
+  const secondCredentials = {
+    ...credentials,
+    name: "Second Member",
+    email: `second-${randomUUID()}@example.com`,
+  };
+  assert.equal(
+    (await request("/api/auth/sign-up/email", secondCredentials)).status,
+    200,
+  );
+  const cookieB = cookie;
+  const tokenB = (await request("/api/auth/token")).data.token;
+  const secondCreated = await request(
+    "/api/events",
+    {
+      ...eventData,
+      title: "Second member event",
+      eventDate: new Date(Date.now() + 5 * 86400000).toISOString(),
+    },
+    tokenB,
+  );
+  assert.equal(secondCreated.status, 201);
+  const secondId = secondCreated.data.event._id;
+  assert.equal(
+    (
+      await request(
+        `/api/events/${created.data.event._id}/manage`,
+        undefined,
+        tokenB,
+      )
+    ).status,
+    403,
+  );
+  assert.equal(
+    (
+      await request(
+        `/api/events/${created.data.event._id}`,
+        eventData,
+        tokenB,
+        true,
+        "PUT",
+      )
+    ).status,
+    403,
+  );
+  assert.equal(
+    (
+      await request(
+        `/api/events/${created.data.event._id}`,
+        undefined,
+        tokenB,
+        true,
+        "DELETE",
+      )
+    ).status,
+    403,
+  );
+  assert.equal(
+    (await request("/api/events/mine", undefined, tokenB)).data.events.length,
+    1,
+  );
+  assert.equal(
+    (await request("/api/events/joined", undefined, tokenB)).data.events.length,
+    0,
+  );
+  cookie = cookieA;
+  assert.equal(
+    (await request(`/api/events/${secondId}/join`, {}, token)).status,
+    201,
+  );
+  const joinedOrder = (await request("/api/events/joined", undefined, token))
+    .data.events;
+  assert.deepEqual(
+    joinedOrder.map((event) => event._id),
+    [String(joinEvent._id), secondId],
+  );
+  cookie = cookieB;
+  const secondUpdate = {
+    ...eventData,
+    title: "Updated second event",
+    eventDate: new Date(Date.now() + 4 * 86400000).toISOString(),
+  };
+  assert.equal(
+    (
+      await request(
+        `/api/events/${secondId}`,
+        secondUpdate,
+        tokenB,
+        true,
+        "PUT",
+      )
+    ).status,
+    200,
+  );
+  cookie = cookieA;
+  assert.equal(
+    (await request("/api/events/joined", undefined, token)).data.events[1]
+      .title,
+    "Updated second event",
+  );
+  cookie = cookieB;
+  assert.equal(
+    (
+      await request(
+        `/api/events/${secondId}`,
+        undefined,
+        tokenB,
+        true,
+        "DELETE",
+      )
+    ).status,
+    200,
+  );
+  assert.equal(await joinedEventModel.countDocuments({ eventId: secondId }), 0);
+  assert.equal(
+    (await request(`/api/events/${secondId}`, undefined, undefined, false))
+      .status,
+    404,
+  );
+  assert.equal(
+    (await request("/api/events/mine", undefined, tokenB)).data.events.length,
+    0,
+  );
+  const race = await request(
+    "/api/events",
+    { ...eventData, title: "Join-delete concurrency check" },
+    tokenB,
+  );
+  assert.equal(race.status, 201);
+  cookie = cookieA;
+  const racingJoin = request(
+    `/api/events/${race.data.event._id}/join`,
+    {},
+    token,
+  );
+  cookie = cookieB;
+  const racingDelete = request(
+    `/api/events/${race.data.event._id}`,
+    undefined,
+    tokenB,
+    true,
+    "DELETE",
+  );
+  const [joinResult, deleteResult] = await Promise.all([
+    racingJoin,
+    racingDelete,
+  ]);
+  assert.equal(deleteResult.status, 200);
+  assert.equal([201, 404].includes(joinResult.status), true);
+  assert.equal(
+    await joinedEventModel.countDocuments({ eventId: race.data.event._id }),
+    0,
+  );
+  cookie = cookieA;
+  assert.equal(
+    (
+      await request(
+        `/api/events/${created.data.event._id}`,
+        undefined,
+        token,
+        true,
+        "DELETE",
+      )
+    ).status,
+    200,
+  );
+  assert.equal(
+    await joinedEventModel.countDocuments({ eventId: created.data.event._id }),
+    0,
+  );
+  assert.equal(
+    (
+      await request(
+        `/api/events/${created.data.event._id}`,
+        undefined,
+        undefined,
+        false,
+      )
+    ).status,
+    404,
+  );
+  assert.equal(
+    (await request("/api/events/joined", undefined, token)).data.events.length,
+    1,
+  );
+  console.log(
+    "PASS: organizer-only actions, own-join rejection, private event lists, full editing, past-date rules, two-account ownership checks, live joined details, atomic deletion and concurrent join/delete cleanup.",
+  );
   console.log(
     "PASS: six-event homepage limit, filters before limits, literal search, public details, missing events, trusted participation, concurrent duplicate prevention and past-event join rejection.",
   );

@@ -74,3 +74,17 @@ test("participation reads and writes require authentication before looking up ev
     assert.equal(reads(), 0);
   });
 });
+
+test("personal lists, edit data and event changes require authentication", async () => {
+  await withApi(async ({ url, reads }) => {
+    for (const path of ["mine", "joined", "123456789012345678901234/manage"])
+      assert.equal((await fetch(`${url}/api/events/${path}`)).status, 401);
+    for (const method of ["PUT", "DELETE"])
+      assert.equal(
+        (await fetch(`${url}/api/events/123456789012345678901234`, { method }))
+          .status,
+        401,
+      );
+    assert.equal(reads(), 0);
+  });
+});

@@ -21,6 +21,11 @@ Run `npm run dev` for development or `npm start` to run the server. Startup requ
 | `GET /api/events/:id` | Public event details, including past events, with a `hasStarted` flag. |
 | `GET /api/events/:id/participation` | The authenticated member's participation status for one event. |
 | `POST /api/events/:id/join` | Joins a future event for the verified member. Requires JWT and active session. |
+| `GET /api/events/mine` | Current organiser's events, newest created first. Protected. |
+| `GET /api/events/joined` | Current participant's events, sorted by event date. Protected. |
+| `GET /api/events/:id/manage` | Owner-only data for the edit form. |
+| `PUT /api/events/:id` | Validates and updates an event owned by the authenticated member. |
+| `DELETE /api/events/:id` | Atomically removes an owned event and its participation records. |
 | `PATCH /api/me` | Updates the current member's name, image, bio and area after JWT/session checks. |
 | `POST /api/uploads?kind=event` | Accepts one authenticated multipart photo in the `image` field. Use `kind=profile` for profile sizing. |
 | `GET /api/images/:id` | Public immutable WebP photo delivery. |
@@ -39,7 +44,13 @@ Upcoming queries exclude past events, sort by `eventDate` and `_id`, and apply M
 
 Public event details include title, description, type, image, location, date and creation time. Organizer identity and email remain excluded. Invalid or missing IDs return a JSON 404. Past details remain readable while new participation is rejected with 409.
 
-Participation identity comes from the verified active session. The event ID comes from the route; request body identities are ignored. The unique event/user index prevents simultaneous duplicate participation. A new join returns 201, while repeating a successful join returns 200 with `alreadyJoined: true`. Participation status exposes only whether the current member has joined. The dedicated joined-event listing and organizer update/delete endpoints belong to later phases.
+Participation identity comes from the verified active session. The event ID comes from the route; request body identities are ignored. Organisers receive 403 if they try to join their own event. Participation status returns `organizer` and `joined` booleans for the current member; organisers report `joined: false`. Public event responses still omit creator IDs and emails.
+
+Joining, editing and deletion use MongoDB transactions. A private event revision serialises new participation against deletion, so a concurrent delete cannot leave a new orphan participation record. The unique event/user index remains in place. New joins return 201, while repeating a join returns 200 with `alreadyJoined: true`. The configured MongoDB deployment must support transactions, as the current Atlas deployment does.
+
+Management endpoints verify creator ID against the JWT-backed active session. GET, PUT and DELETE for another organiser's event return 403. PUT accepts the same six event fields as creation and validates the saved document. An unchanged date may remain in the past; a changed date must be future. Creator identity is never accepted from the edit body. Deletion removes the event and participation records in one transaction; missing events return 404.
+
+The private joined listing reads the authenticated member's event references, loads current event data and sorts by `eventDate` then `_id`. It includes past events for the history view. Missing/deleted events and legacy self-participation are excluded. The organiser listing includes only the current member's events and supplies a `hasStarted` flag for All/Upcoming/Past views. These fixed routes are registered before the public `/:id` route.
 
 ## Photos and editable profiles
 
@@ -63,7 +74,7 @@ Google OAuth consent is configured in Google Auth Platform. While the app is in 
 
 ## Verification
 
-Run `npm test`. Tests exercise configuration, startup failure, model validation, immutable ownership, event and profile request validation, browse query validation, malformed event IDs, participation authentication, image decoding/resizing, identity spoofing, HTTP health and readiness, CORS, request parsing and error responses without connecting to MongoDB.
+Run `npm test`. Tests exercise configuration, startup failure, model validation, immutable ownership, event and profile request validation, browse query validation, malformed event IDs, authentication for participation and personal management, image decoding/resizing, identity spoofing, HTTP health and readiness, CORS, request parsing and error responses without connecting to MongoDB.
 
 Run `npm run db:check` to check the configured connection. For Atlas SRV connections, it checks DNS and certificate-verified TLS before testing authentication and a database ping. It prints no credentials and writes no data. A TLS failure before authentication does not establish whether the password is correct.
 
@@ -71,4 +82,4 @@ Live Atlas verification passed for authentication, database ping, collection/ind
 
 Collections and indexes are initialized explicitly after connecting to MongoDB, so importing models cannot start database operations before a connection is ready.
 
-Run `npm run auth:check` for an isolated live authentication, profile, photo and event check. It creates a uniquely named temporary database and tests password validation, registration, login, sessions, JWT tampering, logout revocation and Google redirect configuration. It also verifies profile persistence and validation, authenticated uploads, image resizing/storage/delivery, event persistence, trusted ownership, future-only listings, chronological ordering, the six-event limit, filtering before limits, literal search, public detail privacy, concurrent duplicate participation and past-event join rejection. It removes only that test database afterward. It does not complete real Google consent or sign-in.
+Run `npm run auth:check` for an isolated live authentication, profile, photo and event check. It creates a uniquely named temporary database and tests password validation, registration, login, sessions, JWT tampering, logout revocation and Google redirect configuration. It also verifies profile persistence, media processing, event creation, discovery, two-account management isolation, owner-join rejection, editing and date rules, joined-list ordering and live details, transactional deletion and a simultaneous join/delete race. It removes only that test database afterward. It does not complete real Google consent or sign-in.

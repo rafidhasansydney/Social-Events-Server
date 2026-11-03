@@ -33,6 +33,7 @@ export const emailField = {
 
 const eventSchema = new mongoose.Schema(
   {
+    revision: { type: Number, default: 0, select: false },
     title: {
       type: String,
       required: [true, "Enter an event title."],
