@@ -16,6 +16,7 @@ export function createApp({
   authUrl = "http://localhost:5000",
   eventModel,
   imageModel,
+  joinedEventModel,
 } = {}) {
   const app = express();
   app.disable("x-powered-by");
@@ -48,7 +49,10 @@ export function createApp({
     ? requireAuth({ auth, issuer: authUrl, audience: clientUrl })
     : (req, res, next) =>
         next(new HttpError(401, "UNAUTHORIZED", "Please log in to continue."));
-  app.use("/api/events", createEventRouter({ authenticate, eventModel }));
+  app.use(
+    "/api/events",
+    createEventRouter({ authenticate, eventModel, joinedEventModel }),
+  );
   app.use("/api", createImageRouter({ authenticate, clientUrl, imageModel }));
   if (auth) {
     app.patch("/api/me", authenticate, async (req, res) => {

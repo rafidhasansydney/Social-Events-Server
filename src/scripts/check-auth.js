@@ -8,6 +8,7 @@ import { createAuth } from "../config/auth.js";
 import { createApp } from "../app.js";
 import { Event } from "../models/event.js";
 import { UploadedImage } from "../models/image.js";
+import { JoinedEvent } from "../models/joined-event.js";
 import sharp from "sharp";
 
 const databaseName = `bandhan_auth_check_${randomUUID().replaceAll("-", "").slice(0, 16)}`;
@@ -38,6 +39,11 @@ try {
     .model("UploadedImage", UploadedImage.schema);
   await imageModel.createCollection();
   await imageModel.createIndexes();
+  const joinedEventModel = connection
+    .useDb(databaseName)
+    .model("JoinedEvent", JoinedEvent.schema);
+  await joinedEventModel.createCollection();
+  await joinedEventModel.createIndexes();
   host.use(
     createApp({
       auth,
@@ -45,6 +51,7 @@ try {
       clientUrl: config.clientUrl,
       eventModel,
       imageModel,
+      joinedEventModel,
     }),
   );
   let cookie = "";
@@ -260,6 +267,101 @@ try {
   assert.equal(limited.data.events.length, 1);
   assert.equal(limited.data.events[0]._id, created.data.event._id);
   assert.equal((await request("/api/events?limit=0")).status, 400);
+  const publicDetail = await request(
+    `/api/events/${created.data.event._id}`,
+    undefined,
+    undefined,
+    false,
+  );
+  assert.equal(publicDetail.status, 200);
+  assert.equal(publicDetail.data.event.title, "A greener neighbourhood");
+  assert.equal(publicDetail.data.event.creatorId, undefined);
+  assert.equal(publicDetail.data.event.creatorEmail, undefined);
+  assert.equal((await request("/api/events/not-an-id")).status, 404);
+  assert.equal(
+    (await request("/api/events/000000000000000000000000")).status,
+    404,
+  );
+  const joinPath = `/api/events/${created.data.event._id}/join`;
+  const statusPath = `/api/events/${created.data.event._id}/participation`;
+  assert.equal((await request(joinPath, {})).status, 401);
+  assert.equal((await request(joinPath, {}, token, false)).status, 401);
+  assert.equal((await request(statusPath)).status, 401);
+  assert.equal(
+    (await request(statusPath, undefined, token)).data.joined,
+    false,
+  );
+  const joins = await Promise.all([
+    request(
+      joinPath,
+      { userId: "forged-member", userEmail: "forged@example.com" },
+      token,
+    ),
+    request(joinPath, {}, token),
+  ]);
+  assert.deepEqual(joins.map((result) => result.status).sort(), [200, 201]);
+  assert.equal(await joinedEventModel.countDocuments(), 1);
+  const participation = await joinedEventModel.findOne().lean();
+  assert.equal(participation.userId, registered.data.user.id);
+  assert.equal(participation.userEmail, credentials.email);
+  assert.equal((await request(statusPath, undefined, token)).data.joined, true);
+  const past = await eventModel.findOne({ title: "Past gathering" }).lean();
+  assert.equal(
+    (await request(`/api/events/${past._id}`, undefined, undefined, false))
+      .status,
+    200,
+  );
+  assert.equal(
+    (await request(`/api/events/${past._id}/join`, {}, token)).status,
+    409,
+  );
+  assert.equal(await joinedEventModel.countDocuments(), 1);
+  await eventModel.collection.insertMany(
+    Array.from({ length: 7 }, (_, index) => ({
+      ...eventData,
+      title: index === 0 ? "Garden (east)" : `Upcoming check ${index}`,
+      eventType: index >= 5 ? "Health" : "Cleanup",
+      eventDate: new Date(Date.now() + (index + 3) * 86400000),
+    })),
+  );
+  const home = await request(
+    "/api/events?limit=6",
+    undefined,
+    undefined,
+    false,
+  );
+  assert.equal(home.data.events.length, 6);
+  assert.equal(home.data.events[0]._id, created.data.event._id);
+  assert.equal(
+    home.data.events.every(
+      (event) => new Date(event.eventDate).getTime() > Date.now(),
+    ),
+    true,
+  );
+  const filteredHome = await request(
+    "/api/events?limit=6&type=Health",
+    undefined,
+    undefined,
+    false,
+  );
+  assert.equal(filteredHome.data.events.length, 2);
+  assert.equal(
+    filteredHome.data.events.every((event) => event.eventType === "Health"),
+    true,
+  );
+  const searched = await request(
+    `/api/events?q=${encodeURIComponent("garden (east)")}`,
+    undefined,
+    undefined,
+    false,
+  );
+  assert.equal(searched.data.events.length, 1);
+  assert.equal(searched.data.events[0].title, "Garden (east)");
+  assert.equal((await request("/api/events?q=.%2A")).data.events.length, 0);
+  assert.equal((await request("/api/events?type=Unknown")).status, 400);
+  console.log(
+    "PASS: six-event homepage limit, filters before limits, literal search, public details, missing events, trusted participation, concurrent duplicate prevention and past-event join rejection.",
+  );
   console.log(
     "PASS: event creation, JWT/session protection, field validation, future dates, trusted ownership, persisted data, public upcoming order, limits and creator privacy.",
   );

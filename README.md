@@ -17,7 +17,10 @@ Run `npm run dev` for development or `npm start` to run the server. Startup requ
 | `/api/auth/*`     | BetterAuth registration, login, sessions, Google OAuth, JWT and JWKS. |
 | `GET /api/me`     | Returns the authenticated user after JWT and active-session checks.   |
 | `POST /api/events` | Creates an event for the authenticated organizer. Requires JWT and active session. |
-| `GET /api/events` | Public future events, sorted by event date and ID. Optional `limit` from 1 to 100. |
+| `GET /api/events` | Public future events, sorted by event date and ID. Optional `limit` from 1 to 100, supported cause as `type`, and title/location search as `q`. |
+| `GET /api/events/:id` | Public event details, including past events, with a `hasStarted` flag. |
+| `GET /api/events/:id/participation` | The authenticated member's participation status for one event. |
+| `POST /api/events/:id/join` | Joins a future event for the verified member. Requires JWT and active session. |
 | `PATCH /api/me` | Updates the current member's name, image, bio and area after JWT/session checks. |
 | `POST /api/uploads?kind=event` | Accepts one authenticated multipart photo in the `image` field. Use `kind=profile` for profile sizing. |
 | `GET /api/images/:id` | Public immutable WebP photo delivery. |
@@ -32,7 +35,11 @@ Joined events reference the original event and store the participant ID and emai
 
 Event creation accepts only `title`, `description`, `eventType`, `thumbnailUrl`, `location` and an ISO date-time string with a timezone as `eventDate`. It validates field types, required values, length limits, supported causes, HTTP(S) image URLs and strictly future dates. Calendar dates that do not exist are rejected. Creator ID and email come from `req.auth`; supplied ownership fields are ignored. Public event responses exclude organizer IDs and email addresses.
 
-Upcoming queries exclude past events, sort by `eventDate` and `_id`, and apply MongoDB `.limit()` when requested. Event details, participation and organizer update/delete endpoints belong to later phases.
+Upcoming queries exclude past events, sort by `eventDate` and `_id`, and apply MongoDB `.limit()` when requested. Type and search filters run before the limit. Searches match literal, case-insensitive text in titles and locations; regular-expression characters are escaped. Query values are validated as single strings and search terms are limited to 100 characters. The homepage requests `limit=6`.
+
+Public event details include title, description, type, image, location, date and creation time. Organizer identity and email remain excluded. Invalid or missing IDs return a JSON 404. Past details remain readable while new participation is rejected with 409.
+
+Participation identity comes from the verified active session. The event ID comes from the route; request body identities are ignored. The unique event/user index prevents simultaneous duplicate participation. A new join returns 201, while repeating a successful join returns 200 with `alreadyJoined: true`. Participation status exposes only whether the current member has joined. The dedicated joined-event listing and organizer update/delete endpoints belong to later phases.
 
 ## Photos and editable profiles
 
@@ -56,7 +63,7 @@ Google OAuth consent is configured in Google Auth Platform. While the app is in 
 
 ## Verification
 
-Run `npm test`. Tests exercise configuration, startup failure, model validation, immutable ownership, event and profile request validation, image decoding/resizing, authentication requirements, identity spoofing, HTTP health and readiness, CORS, request parsing and error responses without connecting to MongoDB.
+Run `npm test`. Tests exercise configuration, startup failure, model validation, immutable ownership, event and profile request validation, browse query validation, malformed event IDs, participation authentication, image decoding/resizing, identity spoofing, HTTP health and readiness, CORS, request parsing and error responses without connecting to MongoDB.
 
 Run `npm run db:check` to check the configured connection. For Atlas SRV connections, it checks DNS and certificate-verified TLS before testing authentication and a database ping. It prints no credentials and writes no data. A TLS failure before authentication does not establish whether the password is correct.
 
@@ -64,4 +71,4 @@ Live Atlas verification passed for authentication, database ping, collection/ind
 
 Collections and indexes are initialized explicitly after connecting to MongoDB, so importing models cannot start database operations before a connection is ready.
 
-Run `npm run auth:check` for an isolated live authentication, profile, photo and event check. It creates a uniquely named temporary database and tests password validation, registration, login, sessions, JWT tampering, logout revocation and Google redirect configuration. It also verifies profile persistence and validation, authenticated uploads, image resizing/storage/delivery, event persistence, rejection of unauthenticated writes and invalid fields, trusted ownership, future-only public listings, chronological ordering, limits and creator privacy. It removes only that test database afterward. It does not complete real Google consent or sign-in.
+Run `npm run auth:check` for an isolated live authentication, profile, photo and event check. It creates a uniquely named temporary database and tests password validation, registration, login, sessions, JWT tampering, logout revocation and Google redirect configuration. It also verifies profile persistence and validation, authenticated uploads, image resizing/storage/delivery, event persistence, trusted ownership, future-only listings, chronological ordering, the six-event limit, filtering before limits, literal search, public detail privacy, concurrent duplicate participation and past-event join rejection. It removes only that test database afterward. It does not complete real Google consent or sign-in.
