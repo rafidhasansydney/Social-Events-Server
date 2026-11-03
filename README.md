@@ -2,6 +2,10 @@
 
 Express and MongoDB backend for the Bandhan community events platform.
 
+Live website: [Bandhan](https://social-events-client-cyan.vercel.app).
+
+Backend: [Render service](https://social-events-server-yvf5.onrender.com), [database readiness](https://social-events-server-yvf5.onrender.com/api/ready).
+
 ## Local setup
 
 Install dependencies with `npm ci`. Create `.env` using `.env.example` and set `MONGODB_URI` to your MongoDB connection string. The application database is selected by `MONGODB_DB_NAME`, which defaults to `bandhan`. Keep `.env` private.
@@ -68,9 +72,13 @@ Registration requires a name, valid profile image URL, email and a password with
 
 JWTs expire after 15 minutes and are verified for signature, algorithm, expiration, issuer and audience. Protected endpoints also verify that the associated cookie session is still active, so logout revokes API access immediately. The client requests tokens as needed and does not persist JWTs in browser storage.
 
-The frontend proxies `/api/*` to this server. Set the frontend `API_URL` to the backend origin in hosting configuration. For production on separate hosting domains, set `BETTER_AUTH_URL` to the public frontend proxy origin and add that origin's Google callback URI. Keep `CLIENT_URL` equal to the frontend origin. Verify HTTPS cookies, trusted proxy client IP handling and OAuth after deployment.
+The frontend proxies `/api/*` to this server. Vercel sets `API_URL=https://social-events-server-yvf5.onrender.com`. Render sets both `CLIENT_URL` and `BETTER_AUTH_URL` to `https://social-events-client-cyan.vercel.app`. The registered live Google callback is `https://social-events-client-cyan.vercel.app/api/auth/callback/google`. Credentials remain private hosting environment values. Local development keeps the localhost values from `.env.example`.
 
-Google OAuth consent is configured in Google Auth Platform. While the app is in Testing mode, add the Google accounts used for testing under Audience. A real browser sign-in on localhost verified Google account linking, the callback, an active session and access to the protected account page. Repeat this verification after deployment.
+Google OAuth consent is configured in Google Auth Platform. This app requests basic identity scopes only (`openid`, `email`, `profile`), which Google exempts from the Testing-mode test-user restriction in its [audience guidance](https://support.google.com/cloud/answer/15549945?hl=en). Additional scopes require reassessing audience and verification settings. Real Google sign-in was verified locally, and the project owner completed the live sign-in and supplied the authenticated account-page result.
+
+Render uses the Node runtime, `npm ci`, `npm start`, `PORT=10000`, `NODE_ENV=production`, `NODE_VERSION=24.19.0` and `/api/ready` for health checks. Atlas allows the service's currently reported outbound ranges `74.220.48.0/24` and `74.220.56.0/24`. Recheck Connect > Outbound after moving or recreating the service. The free service may take longer to answer its first request after an idle period.
+
+Production checks on 3 November 2026 passed for database readiness, public events, anonymous-session handling, anonymous access denial on profile/management/joined APIs, the configured frontend CORS origin and rejection of an untrusted origin. These checks did not create or remove production records. Authenticated event write workflows remain covered by the isolated live check described below; repeat the browser workflow on the live site before submission.
 
 ## Verification
 
