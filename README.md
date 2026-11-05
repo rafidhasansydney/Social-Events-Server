@@ -1,93 +1,180 @@
-# Bandhan server
+<div align="center">
+  <img src="docs/images/banner.svg" alt="Bandhan — the community events API" width="100%" />
+  <p><strong>The API behind local gatherings, trusted accounts and shared purpose.</strong></p>
+  <p>
+    <a href="https://social-events-client-cyan.vercel.app"><img src="https://img.shields.io/badge/Visit_Bandhan-244B3B?style=for-the-badge&amp;logo=vercel&amp;logoColor=white" alt="Open Bandhan" /></a>
+    <a href="https://social-events-server-yvf5.onrender.com/api/ready"><img src="https://img.shields.io/badge/API_Readiness-D36C43?style=for-the-badge&amp;logo=express&amp;logoColor=white" alt="API readiness" /></a>
+  </p>
+  <p>
+    <img src="https://img.shields.io/badge/Node.js_24-417E38?style=flat-square&amp;logo=nodedotjs&amp;logoColor=white" alt="Node.js 24" />
+    <img src="https://img.shields.io/badge/Express_5-171717?style=flat-square&amp;logo=express&amp;logoColor=white" alt="Express 5" />
+    <img src="https://img.shields.io/badge/MongoDB_Atlas-116149?style=flat-square&amp;logo=mongodb&amp;logoColor=white" alt="MongoDB Atlas" />
+    <img src="https://img.shields.io/badge/Mongoose_9-880000?style=flat-square" alt="Mongoose 9" />
+    <img src="https://img.shields.io/badge/BetterAuth-244B3B?style=flat-square" alt="BetterAuth" />
+    <img src="https://img.shields.io/badge/JWT-7C3AED?style=flat-square&amp;logo=jsonwebtokens&amp;logoColor=white" alt="JSON Web Tokens" />
+  </p>
+  <p><a href="#what-the-api-handles">Features</a> · <a href="#run-it-locally">Setup</a> · <a href="#api-reference">API reference</a> · <a href="#verification">Verification</a> · <a href="#assignment-submission">Submission links</a></p>
+</div>
 
-Express and MongoDB backend for the Bandhan community events platform.
+## 🌿 Behind the community
 
-Live website: [Bandhan](https://social-events-client-cyan.vercel.app).
+Bandhan helps neighbours create, join and track social service events. This repository provides authentication, event discovery, owner-only management, participation, photo storage and editable profiles.
 
-Backend: [Render service](https://social-events-server-yvf5.onrender.com), [database readiness](https://social-events-server-yvf5.onrender.com/api/ready).
+| Destination | Link |
+|---|---|
+| Live website | [social-events-client-cyan.vercel.app](https://social-events-client-cyan.vercel.app) |
+| API health | [Server status](https://social-events-server-yvf5.onrender.com/api/health) |
+| Database readiness | [Server and MongoDB status](https://social-events-server-yvf5.onrender.com/api/ready) |
+| Frontend source | [Social-Events-Client](https://github.com/rafidhasansydney/Social-Events-Client) |
 
-## Local setup
+## 📸 The experience this API powers
 
-Install dependencies with `npm ci`. Create `.env` using `.env.example` and set `MONGODB_URI` to your MongoDB connection string. The application database is selected by `MONGODB_DB_NAME`, which defaults to `bandhan`. Keep `.env` private.
+![Bandhan application homepage](docs/images/application-preview.jpg)
 
-Run `npm run dev` for development or `npm start` to run the server. Startup requires a working database connection and permission to create collections and indexes. Missing configuration or a failed connection stops startup with a nonzero exit code.
+A real screenshot of the client connected to this API. [Explore frontend screenshots](https://github.com/rafidhasansydney/Social-Events-Client#a-look-around) for light, dark and mobile views.
 
-## Current endpoints
+<a name="what-the-api-handles"></a>
 
-| Endpoint          | Purpose                                                               |
-| ----------------- | --------------------------------------------------------------------- |
-| `GET /api/health` | Confirms that the HTTP server is running.                             |
-| `GET /api/ready`  | Pings MongoDB and returns 503 if it is unavailable.                   |
-| `/api/auth/*`     | BetterAuth registration, login, sessions, Google OAuth, JWT and JWKS. |
-| `GET /api/me`     | Returns the authenticated user after JWT and active-session checks.   |
-| `POST /api/events` | Creates an event for the authenticated organizer. Requires JWT and active session. |
-| `GET /api/events` | Public future events, sorted by event date and ID. Optional `limit` from 1 to 100, supported cause as `type`, and title/location search as `q`. |
-| `GET /api/events/:id` | Public event details, including past events, with a `hasStarted` flag. |
-| `GET /api/events/:id/participation` | The authenticated member's participation status for one event. |
-| `POST /api/events/:id/join` | Joins a future event for the verified member. Requires JWT and active session. |
-| `GET /api/events/mine` | Current organiser's events, newest created first. Protected. |
-| `GET /api/events/joined` | Current participant's events, sorted by event date. Protected. |
-| `GET /api/events/:id/manage` | Owner-only data for the edit form. |
-| `PUT /api/events/:id` | Validates and updates an event owned by the authenticated member. |
-| `DELETE /api/events/:id` | Atomically removes an owned event and its participation records. |
-| `PATCH /api/me` | Updates the current member's name, image, bio and area after JWT/session checks. |
-| `POST /api/uploads?kind=event` | Accepts one authenticated multipart photo in the `image` field. Use `kind=profile` for profile sizing. |
-| `GET /api/images/:id` | Public immutable WebP photo delivery. |
+## ✨ What the API handles
 
-Browser requests are allowed from the exact `CLIENT_URL` origin. Errors use `{ ok: false, error: { code, message, details? } }`.
+- **Member authentication:** BetterAuth email/password sessions, Google Login, JWT issuance and public JWKS.
+- **Protected access:** JWT signature, expiry, issuer and audience checks, followed by active-session verification. Logout revokes protected access.
+- **Event discovery:** Future events in date order, MongoDB `.limit()`, cause filtering and literal title/location search.
+- **Owner management:** Verified organisers create and edit their events. Other users cannot change or delete them.
+- **Participation:** One saved join per member/event. Organisers cannot join their own gatherings; past events do not accept joins.
+- **Consistent deletion:** Transactions remove an event and its participation records together. Joining and deletion coordinate to avoid orphan records.
+- **Photo uploads:** Authenticated JPG, PNG and WebP uploads are decoded, resized and stored as WebP in MongoDB.
+- **Editable profiles:** Name, photo, area and bio validation, with identity and email protected from profile overwrites.
+- **Useful failures:** Structured errors, restricted CORS, image limits and separate health/readiness endpoints.
 
-## Data model
+## 🧩 Request journey
 
-Events store a title, description, event type, image URL, location, future event date, creator ID and creator email. Creator identity is immutable. Event dates and creator IDs are indexed for upcoming events and organizer listings.
+```mermaid
+flowchart LR
+  Browser[Browser] --> Proxy[Next.js API proxy]
+  Proxy --> Express[Express routes]
+  Express --> Auth[JWT and active session]
+  Auth --> Protected[Profiles and event ownership]
+  Express --> Public[Public event discovery]
+  Protected --> Atlas[(MongoDB Atlas)]
+  Public --> Atlas
+  Express --> Images[Image processing]
+  Images --> Atlas
+```
 
-Joined events reference the original event and store the participant ID and email. A unique compound index on `eventId` and `userId` prevents duplicate participation once the index is initialized. Reading the referenced event keeps joined listings consistent with organizer updates.
+Browser requests and the live Google callback pass through the frontend `/api/*` proxy, so the session cookie belongs to the website origin.
 
-Event creation accepts only `title`, `description`, `eventType`, `thumbnailUrl`, `location` and an ISO date-time string with a timezone as `eventDate`. It validates field types, required values, length limits, supported causes, HTTP(S) image URLs and strictly future dates. Calendar dates that do not exist are rejected. Creator ID and email come from `req.auth`; supplied ownership fields are ignored. Public event responses exclude organizer IDs and email addresses.
+<a name="run-it-locally"></a>
 
-Upcoming queries exclude past events, sort by `eventDate` and `_id`, and apply MongoDB `.limit()` when requested. Type and search filters run before the limit. Searches match literal, case-insensitive text in titles and locations; regular-expression characters are escaped. Query values are validated as single strings and search terms are limited to 100 characters. The homepage requests `limit=6`.
+## 🚀 Run it locally
 
-Public event details include title, description, type, image, location, date and creation time. Organizer identity and email remain excluded. Invalid or missing IDs return a JSON 404. Past details remain readable while new participation is rejected with 409.
+Use Node.js 24 and npm, plus a MongoDB deployment that supports transactions, such as Atlas. In Git Bash:
 
-Participation identity comes from the verified active session. The event ID comes from the route; request body identities are ignored. Organisers receive 403 if they try to join their own event. Participation status returns `organizer` and `joined` booleans for the current member; organisers report `joined: false`. Public event responses still omit creator IDs and emails.
+```bash
+git clone https://github.com/rafidhasansydney/Social-Events-Server.git
+cd Social-Events-Server
+npm ci
+cp .env.example .env
+```
 
-Joining, editing and deletion use MongoDB transactions. A private event revision serialises new participation against deletion, so a concurrent delete cannot leave a new orphan participation record. The unique event/user index remains in place. New joins return 201, while repeating a join returns 200 with `alreadyJoined: true`. The configured MongoDB deployment must support transactions, as the current Atlas deployment does.
+Fill in `.env`, then run `npm run dev`. The local API listens on [localhost:5000](http://localhost:5000/api/health). Startup requires a working database connection and permission to initialise collections and indexes.
 
-Management endpoints verify creator ID against the JWT-backed active session. GET, PUT and DELETE for another organiser's event return 403. PUT accepts the same six event fields as creation and validates the saved document. An unchanged date may remain in the past; a changed date must be future. Creator identity is never accepted from the edit body. Deletion removes the event and participation records in one transaction; missing events return 404.
+| Variable | Local value or requirement |
+|---|---|
+| `PORT` | `5000` |
+| `MONGODB_URI` | Your Atlas connection string |
+| `MONGODB_DB_NAME` | `bandhan` |
+| `CLIENT_URL` | `http://localhost:3000` |
+| `BETTER_AUTH_URL` | `http://localhost:5000` |
+| `BETTER_AUTH_SECRET` | A stable random secret of at least 32 characters |
+| `GOOGLE_CLIENT_ID` | Google OAuth web client ID |
+| `GOOGLE_CLIENT_SECRET` | Google OAuth client secret |
 
-The private joined listing reads the authenticated member's event references, loads current event data and sorts by `eventDate` then `_id`. It includes past events for the history view. Missing/deleted events and legacy self-participation are excluded. The organiser listing includes only the current member's events and supplies a `hasStarted` flag for All/Upcoming/Past views. These fixed routes are registered before the public `/:id` route.
+`.env` is gitignored. Store hosting credentials in environment settings. Use `npm start` to run the server without development file watching.
 
-## Photos and editable profiles
+<a name="api-reference"></a>
 
-Uploads require both a valid JWT and an active cookie session. Multer accepts one JPG, PNG or WebP file, at most 4 MB, with no extra multipart fields. Sharp verifies actual image data, rejects unsupported/animated formats and images over 40 megapixels, orients the photo, removes metadata and converts it to WebP. Event photos fit within 1600×1600 and profile photos within 512×512 without enlargement. Compressed output is limited to 1 MB. Upload attempts are limited to 30 per member per hour per running server process.
+## 📡 API reference
 
-The `UploadedImage` collection stores compressed bytes, dimensions and the authenticated uploader ID. Public responses return image URLs and dimensions; they do not expose uploader identities. Images are served with `image/webp`, `nosniff` and immutable cache headers. This uses the existing MongoDB connection and storage allowance; no media API key or writable hosting disk is required. Older image files are retained when a profile photo is replaced.
+Protected requests require a bearer JWT and its active session cookie.
 
-The profile endpoint accepts only `name`, `image`, `bio` and `location` and updates the current BetterAuth user. Names are trimmed and limited to 100 characters, bios to 400 and areas to 100. Email, user ID and other account fields cannot be changed through this endpoint. The same field validation runs on BetterAuth's direct update route. Additional bio and location fields default to empty strings for new users; older users can leave them empty.
+| Area | Routes | Access |
+|---|---|---|
+| Service status | `GET /api/health`, `GET /api/ready` | Public |
+| Authentication | `/api/auth/*` | Varies by BetterAuth endpoint |
+| Discovery | `GET /api/events`, `GET /api/events/:id` | Public |
+| Create | `POST /api/events` | Member |
+| Personal lists | `GET /api/events/mine`, `GET /api/events/joined` | Member |
+| Manage | `GET /api/events/:id/manage`, `PUT /api/events/:id`, `DELETE /api/events/:id` | Owner |
+| Participation | `GET /api/events/:id/participation`, `POST /api/events/:id/join` | Member |
+| Profile | `GET /api/me`, `PATCH /api/me` | Member |
+| Photos | `POST /api/uploads?kind=event`, `POST /api/uploads?kind=profile` | Member |
+| Image delivery | `GET /api/images/:id` | Public |
 
-## Authentication
+Example: `/api/events?limit=6&type=Cleanup&q=Dhaka`. `limit` accepts 1–100. The six supported causes are Cleanup, Plantation, Donation, Education, Health and Food Drive.
 
-Set a stable random `BETTER_AUTH_SECRET` of at least 32 characters. Set `BETTER_AUTH_URL` to the public auth origin, with `http://localhost:5000` for local development. Google OAuth uses `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and an authorized redirect URI of `BETTER_AUTH_URL/api/auth/callback/google`.
+Read the [complete API and data reference](docs/API.md) for request fields, validation, response behaviour, transactions and upload limits.
 
-Registration requires a name, valid profile image URL, email and a password with 6–128 characters containing an uppercase and a lowercase letter. Successful registration signs the user in. Email verification and password reset are disabled for this assignment.
+## ☁️ Hosting and OAuth
 
-JWTs expire after 15 minutes and are verified for signature, algorithm, expiration, issuer and audience. Protected endpoints also verify that the associated cookie session is still active, so logout revokes API access immediately. The client requests tokens as needed and does not persist JWTs in browser storage.
+| Render setting | Value |
+|---|---|
+| Runtime / Node | Node / `24.19.0` |
+| Branch / root | `main` / repository root |
+| Build / start | `npm ci` / `npm start` |
+| `PORT` / `NODE_ENV` | `10000` / `production` |
+| Health check | `/api/ready` |
+| `CLIENT_URL` | `https://social-events-client-cyan.vercel.app` |
+| `BETTER_AUTH_URL` | `https://social-events-client-cyan.vercel.app` |
 
-The frontend proxies `/api/*` to this server. Vercel sets `API_URL=https://social-events-server-yvf5.onrender.com`. Render sets both `CLIENT_URL` and `BETTER_AUTH_URL` to `https://social-events-client-cyan.vercel.app`. The registered live Google callback is `https://social-events-client-cyan.vercel.app/api/auth/callback/google`. Credentials remain private hosting environment values. Local development keeps the localhost values from `.env.example`.
+Vercel sets `API_URL=https://social-events-server-yvf5.onrender.com`.
 
-Google OAuth consent is configured in Google Auth Platform. This app requests basic identity scopes only (`openid`, `email`, `profile`), which Google exempts from the Testing-mode test-user restriction in its [audience guidance](https://support.google.com/cloud/answer/15549945?hl=en). Additional scopes require reassessing audience and verification settings. Real Google sign-in was verified locally, and the project owner completed the live sign-in and supplied the authenticated account-page result.
+| Google OAuth setting | Local | Live |
+|---|---|---|
+| JavaScript origin | `http://localhost:3000` | `https://social-events-client-cyan.vercel.app` |
+| Redirect URI | `http://localhost:5000/api/auth/callback/google` | `https://social-events-client-cyan.vercel.app/api/auth/callback/google` |
 
-Render uses the Node runtime, `npm ci`, `npm start`, `PORT=10000`, `NODE_ENV=production`, `NODE_VERSION=24.19.0` and `/api/ready` for health checks. Atlas allows the service's currently reported outbound ranges `74.220.48.0/24` and `74.220.56.0/24`. Recheck Connect > Outbound after moving or recreating the service. The free service may take longer to answer its first request after an idle period.
+Only the basic identity scopes `openid`, `email` and `profile` are requested. Google's [audience guidance](https://support.google.com/cloud/answer/15549945?hl=en) explains their Testing-mode exception. Email verification and password reset are omitted for the assignment.
 
-Production checks on 3 November 2026 passed for database readiness, public events, anonymous-session handling, anonymous access denial on profile/management/joined APIs, the configured frontend CORS origin and rejection of an untrusted origin. These checks did not create or remove production records. Authenticated event write workflows remain covered by the isolated live check described below; repeat the browser workflow on the live site before submission.
+Atlas must allow the service's outbound ranges. This Render service reported `74.220.48.0/24` and `74.220.56.0/24`; recheck Connect → Outbound if it moves or is recreated. The free service can sleep while idle. Photos persist in MongoDB rather than the hosting filesystem.
 
-## Verification
+<a name="verification"></a>
 
-Run `npm test`. Tests exercise configuration, startup failure, model validation, immutable ownership, event and profile request validation, browse query validation, malformed event IDs, authentication for participation and personal management, image decoding/resizing, identity spoofing, HTTP health and readiness, CORS, request parsing and error responses without connecting to MongoDB.
+## ✅ Verification
 
-Run `npm run db:check` to check the configured connection. For Atlas SRV connections, it checks DNS and certificate-verified TLS before testing authentication and a database ping. It prints no credentials and writes no data. A TLS failure before authentication does not establish whether the password is correct.
+| Command | What it checks |
+|---|---|
+| `npm test` | 32 tests for configuration, validation, JWT/session access, routes, errors, uploads and CORS |
+| `npm run db:check` | DNS, certificate-verified TLS, MongoDB authentication and ping; no writes |
+| `npm run auth:check` | Isolated account/profile/photo/event workflows using a temporary database |
 
-Live Atlas verification passed for authentication, database ping, collection/index creation, event writes and updates, joined-event references and duplicate-key enforcement. Temporary verification records were removed afterward. The automated test suite does not write data to a database.
+The isolated check covers two-account ownership, duplicate joins, edit validation, ordering, transactional deletion and a concurrent join/delete race. It cleans up only its uniquely named test database and does not complete real Google consent.
 
-Collections and indexes are initialized explicitly after connecting to MongoDB, so importing models cannot start database operations before a connection is ready.
+On **5 November 2026**, all 32 unit tests and nine public production API checks passed. The isolated check could not be rerun from the local connection because Atlas TLS access failed before authentication. Production database readiness passed. The [current review report](https://github.com/rafidhasansydney/Social-Events-Client/blob/main/docs/VERIFICATION.md) records the tested scope.
 
-Run `npm run auth:check` for an isolated live authentication, profile, photo and event check. It creates a uniquely named temporary database and tests password validation, registration, login, sessions, JWT tampering, logout revocation and Google redirect configuration. It also verifies profile persistence, media processing, event creation, discovery, two-account management isolation, owner-join rejection, editing and date rules, joined-list ordering and live details, transactional deletion and a simultaneous join/delete race. It removes only that test database afterward. It does not complete real Google consent or sign-in.
+## 📁 Project map
+
+```text
+src/config/       Environment, database and BetterAuth setup
+src/routes/       Event and image routes
+src/models/       Events, participation and uploaded-image storage
+src/middleware/   Authentication and structured errors
+src/utils/        Input validation and HTTP errors
+src/scripts/      Database and isolated workflow checks
+test/             Automated tests
+docs/             API reference and README visuals
+```
+
+Profile routes are registered in `src/app.js`.
+
+<a name="assignment-submission"></a>
+
+## 📎 Assignment submission
+
+| Required item | Link |
+|---|---|
+| Live site | [Bandhan](https://social-events-client-cyan.vercel.app) |
+| Client repository | [Social-Events-Client](https://github.com/rafidhasansydney/Social-Events-Client) |
+| Server repository | [Social-Events-Server](https://github.com/rafidhasansydney/Social-Events-Server) |
+
+Built by [Rafid Hasan Sydney](https://github.com/rafidhasansydney).
